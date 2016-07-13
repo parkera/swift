@@ -18,6 +18,7 @@
 set(SWIFTLIB_ESSENTIAL
   ### PLEASE KEEP THIS LIST IN ALPHABETICAL ORDER ###
   Algorithm.swift
+  AnyHashable.swift
   ArrayBody.swift
   ArrayBuffer.swift
   ArrayBufferProtocol.swift

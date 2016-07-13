@@ -2807,3 +2807,71 @@ SWIFT_CC(c) SWIFT_RUNTIME_EXPORT
 extern "C" bool swift_isOptionalType(const Metadata *type) {
   return type->getKind() == MetadataKind::Optional;
 }
+
+//===----------------------------------------------------------------------===//
+// AnyHashable support
+//===----------------------------------------------------------------------===//
+
+extern "C" const ProtocolDescriptor _TMps8Hashable;
+
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
+extern "C" void swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
+  const OpaqueValue *value,
+  const void *anyHashableResultPointer,
+  const Metadata *T,
+  const WitnessTable *hashableWT
+);
+
+SWIFT_CC(swift) SWIFT_RUNTIME_STDLIB_INTERFACE
+extern "C" void swift_stdlib_makeAnyHashableUpcastingToHashableBaseType(
+  const OpaqueValue *value,
+  const void *anyHashableResultPointer,
+  const Metadata *type,
+  const WitnessTable *hashableWT
+) {
+  switch (type->getKind()) {
+  case MetadataKind::Class:
+  case MetadataKind::ObjCClassWrapper:
+  case MetadataKind::ForeignClass: {
+    // FIXME: handle ForeignClass.
+    while (true) {
+      const Metadata *superclass = _swift_class_getSuperclass(type);
+      if (!superclass)
+        break;
+      if (!swift_conformsToProtocol(superclass, &_TMps8Hashable))
+        break;
+      type = superclass;
+    }
+    swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
+        value, anyHashableResultPointer, type, hashableWT);
+    return;
+  }
+
+  case MetadataKind::Struct:
+  case MetadataKind::Enum:
+  case MetadataKind::Optional:
+    swift_stdlib_makeAnyHashableUsingDefaultRepresentation(
+        value, anyHashableResultPointer, type, hashableWT);
+    return;
+
+  case MetadataKind::ErrorObject:
+    // FIXME: handle ErrorObject.
+    _failCorruptType(type);
+
+  case MetadataKind::Opaque:
+  case MetadataKind::Tuple:
+  case MetadataKind::Function:
+  case MetadataKind::Existential:
+  case MetadataKind::Metatype:
+  case MetadataKind::ExistentialMetatype:
+  case MetadataKind::HeapLocalVariable:
+  case MetadataKind::HeapGenericLocalVariable:
+    // We assume that the value can not be an existential,
+    // because existentials can't conform to Hashable today.
+    //
+    // FIXME: handle generalized existentials.
+    _failCorruptType(type);
+  }
+  _failCorruptType(type);
+}
+

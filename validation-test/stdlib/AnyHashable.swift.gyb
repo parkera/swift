@@ -1,0 +1,228 @@
+// RUN: %target-run-simple-swiftgyb
+// REQUIRES: executable_test
+
+// FIXME: add a test for a struct with a custom representation that is a
+// LifetimeTracked.
+
+// FIXME: add tests that use NSObject.
+
+// FIXME: add tests that use CF objects (is this even possible?)
+
+// FIXME: add tests that use Swift errors and Objective-C errors.
+
+// FIXME: add tests for enums.
+
+// FIXME: add tests for generic class hierarchies.
+
+// FIXME: add tests for unboxing.
+
+import StdlibUnittest
+
+let AnyHashableTests = TestSuite("AnyHashableTests")
+
+% for wrapped in ['MinimalHashableValue', 'MinimalHashableClass']:
+AnyHashableTests.test("AnyHashable(${wrapped})/Hashable") {
+  let xs = (0...5).flatMap {
+    [ ${wrapped}($0, identity: 0),
+      ${wrapped}($0, identity: 1) ]
+  }
+  checkHashable(xs, equalityOracle: { $0 / 2 == $1 / 2 })
+
+  let anyHashableXs = xs.map(AnyHashable.init)
+  checkHashable(anyHashableXs, equalityOracle: { $0 / 2 == $1 / 2 })
+}
+% end
+
+% for (kw, name) in [
+%   ('class', 'Class'),
+%   ('struct', 'PODStruct'),
+%   ('struct', 'RCStruct'),
+% ]:
+${kw} HasCustomRepresentation_${name}
+  : Hashable, _HasCustomAnyHashableRepresentation
+{
+%   if name == 'RCStruct':
+  var lifetimeTrackedValue: LifetimeTracked
+  var value: Int {
+    return lifetimeTrackedValue.value
+  }
+%   else:
+  var value: Int
+%   end
+  var identity: Int
+  var hasDefaultAnyHashableRepresentation: Bool
+  init(_ value: Int, identity: Int, hasDefaultAnyHashableRepresentation: Bool) {
+%   if name == 'RCStruct':
+    self.lifetimeTrackedValue = LifetimeTracked(value)
+%   else:
+    self.value = value
+%   end
+    self.identity = identity
+    self.hasDefaultAnyHashableRepresentation = hasDefaultAnyHashableRepresentation
+  }
+  var hashValue: Int {
+    return value
+  }
+  func _toCustomAnyHashable() -> AnyHashable? {
+    if hasDefaultAnyHashableRepresentation {
+      return nil
+    }
+    let customRepresentation =
+      MinimalHashableValue(value, identity: identity)
+    return AnyHashable(customRepresentation)
+  }
+}
+func == (
+  lhs: HasCustomRepresentation_${name},
+  rhs: HasCustomRepresentation_${name}
+) -> Bool {
+  return lhs.value == rhs.value
+}
+
+${kw} HasCustomRepresentation_Generic${name}<Wrapped>
+  : Hashable, _HasCustomAnyHashableRepresentation
+{
+  var value: Wrapped
+  var identity: Int
+  var hasDefaultAnyHashableRepresentation: Bool
+  init(
+    _ value: Wrapped,
+    identity: Int,
+    hasDefaultAnyHashableRepresentation: Bool
+  ) {
+    self.value = value
+    self.identity = identity
+    self.hasDefaultAnyHashableRepresentation = hasDefaultAnyHashableRepresentation
+  }
+  var hashValue: Int {
+    return asGenericMinimalHashableValue.hashValue
+  }
+  func _toCustomAnyHashable() -> AnyHashable? {
+    if hasDefaultAnyHashableRepresentation {
+      return nil
+    }
+    let customRepresentation =
+      GenericMinimalHashableValue(value, identity: identity)
+    return AnyHashable(customRepresentation)
+  }
+  var asGenericMinimalHashableValue: GenericMinimalHashableValue<Wrapped> {
+    return GenericMinimalHashableValue(value, identity: identity)
+  }
+}
+func == <Wrapped> (
+  lhs: HasCustomRepresentation_Generic${name}<Wrapped>,
+  rhs: HasCustomRepresentation_Generic${name}<Wrapped>
+) -> Bool {
+  return
+    lhs.asGenericMinimalHashableValue ==
+    rhs.asGenericMinimalHashableValue
+}
+% end
+
+% for name in [ 'Class', 'PODStruct', 'RCStruct' ]:
+%   wrapped = 'HasCustomRepresentation_%s' % name
+%   genericWrapped = 'HasCustomRepresentation_Generic%s' % name
+AnyHashableTests.test("AnyHashable with ${wrapped}") {
+  let xs = (-2...2).flatMap {
+    [ ${wrapped}(
+        $0, identity: 0,
+        hasDefaultAnyHashableRepresentation: $0 < 0),
+      ${wrapped}(
+        $0, identity: 1,
+        hasDefaultAnyHashableRepresentation: $0 < 0) ]
+  }
+  checkHashable(xs, equalityOracle: { $0 / 2 == $1 / 2 })
+
+  let anyHashableXs = xs.map(AnyHashable.init)
+  checkHashable(anyHashableXs, equalityOracle: { $0 / 2 == $1 / 2 })
+}
+
+%   for payload in [ 'OpaqueValue<Int>', 'LifetimeTracked' ]:
+AnyHashableTests.test("AnyHashable with ${genericWrapped} with ${payload}") {
+  GenericMinimalHashableValue_equalImpl.value = {
+    ($0 as! ${payload}).value == ($1 as! ${payload}).value
+  }
+  GenericMinimalHashableValue_hashValueImpl.value = {
+    ($0 as! ${payload}).value
+  }
+  let xs = (-2...2).flatMap {
+    [ ${genericWrapped}(
+        ${payload}($0), identity: 0,
+        hasDefaultAnyHashableRepresentation: $0 < 0),
+      ${genericWrapped}(
+        ${payload}($0), identity: 1,
+        hasDefaultAnyHashableRepresentation: $0 < 0) ]
+  }
+  checkHashable(xs, equalityOracle: { $0 / 2 == $1 / 2 })
+
+  let anyHashableXs = xs.map(AnyHashable.init)
+  checkHashable(anyHashableXs, equalityOracle: { $0 / 2 == $1 / 2 })
+}
+%   end
+% end
+
+class T1_Base {}
+class T2_Base1 {}
+class T2_Base : T2_Base1 {}
+
+% for base_class_chain_length in [ 0, 1, 2 ]:
+%   prefix = 'T%s' % base_class_chain_length
+%   base = '' if base_class_chain_length == 0 else 'T%s_Base,' % base_class_chain_length
+
+class ${prefix}_HashableBase : ${base} Hashable {
+  static var collisions: Bool = false
+  var value: Int
+  init(_ value: Int) {
+    self.value = value
+  }
+  var hashValue: Int {
+    return value
+  }
+}
+func == (lhs: ${prefix}_HashableBase, rhs: ${prefix}_HashableBase) -> Bool {
+  return lhs.value == rhs.value
+}
+
+%{
+types = [
+  (prefix + '_HashableBase', prefix + '_Base'),
+  (prefix + '_DerivedA', prefix + '_HashableBase'),
+  (prefix + '_DerivedB', prefix + '_HashableBase'),
+  (prefix + '_DerivedAA', prefix + '_DerivedA'),
+  (prefix + '_DerivedAB', prefix + '_DerivedA'),
+  (prefix + '_DerivedBA', prefix + '_DerivedB'),
+  (prefix + '_DerivedBB', prefix + '_DerivedB'),
+  (prefix + '_DerivedAAA', prefix + '_DerivedAA'),
+  (prefix + '_DerivedAAB', prefix + '_DerivedAA'),
+  (prefix + '_DerivedABA', prefix + '_DerivedAB'),
+  (prefix + '_DerivedABB', prefix + '_DerivedAB'),
+  (prefix + '_DerivedBAA', prefix + '_DerivedBA'),
+  (prefix + '_DerivedBAB', prefix + '_DerivedBA'),
+  (prefix + '_DerivedBBA', prefix + '_DerivedBB'),
+  (prefix + '_DerivedBBB', prefix + '_DerivedBB'),
+]
+}%
+
+% for (Self, Super) in types:
+%   if 'HashableBase' not in Self:
+class ${Self} : ${Super} {}
+%   end
+% end
+
+AnyHashableTests.test("AnyHashable with classes from the ${prefix} hirearchy") {
+  let xs = [
+% for (i, (Self, _)) in enumerate(types):
+    ${Self}(${i}),
+    ${Self}(${i}),
+% end
+  ]
+  checkHashable(xs, equalityOracle: { $0 / 2 == $1 / 2 })
+
+  let anyHashableXs = xs.map(AnyHashable.init)
+  checkHashable(anyHashableXs, equalityOracle: { $0 / 2 == $1 / 2 })
+}
+
+% end
+
+runAllTests()
+
