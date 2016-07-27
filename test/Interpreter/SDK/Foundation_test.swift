@@ -254,51 +254,52 @@ if #available(OSX 10.11, iOS 9.0, *) {
 }
 
 private let KEY = "some-key"
-private func createTestArchive() -> NSData {
-  let mutableData = NSMutableData()
-  let KA = NSKeyedArchiver(forWritingWith: mutableData)
+
+@available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *)
+private func createTestArchive() -> Data {
+  let KA = NSKeyedArchiver()
 
   // Set up some fake data.
   let obj =  NSPredicate(value: true)
   KA.encode(obj, forKey: KEY)
   KA.encode(obj, forKey: NSKeyedArchiveRootObjectKey)
-  KA.finishEncoding()
-
-  return mutableData
+  return KA.encodedData
 }
 
+if #available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *) {
 FoundationTestSuite.test("NSKeyedUnarchiver/decodeObjectOfClass(_:forKey:)") {
-  let obj = NSPredicate(value: true)
-  let data = createTestArchive()
+    let obj = NSPredicate(value: true)
+    let data = createTestArchive()
 
-  var KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+    var KU = NSKeyedUnarchiver(forReadingWith: data)
 
-  var missing = KU.decodeObject(of: NSPredicate.self, forKey: "Not there")
-  expectEmpty(missing)
-  expectType((NSPredicate?).self, &missing)
+    var missing = KU.decodeObject(of: NSPredicate.self, forKey: "Not there")
+    expectEmpty(missing)
+    expectType((NSPredicate?).self, &missing)
 
-  var decoded = KU.decodeObject(of: NSPredicate.self, forKey: KEY)
-  expectNotEmpty(decoded)
-  expectType((NSPredicate?).self, &decoded)
+    var decoded = KU.decodeObject(of: NSPredicate.self, forKey: KEY)
+    expectNotEmpty(decoded)
+    expectType((NSPredicate?).self, &decoded)
 
-  var wrongType = KU.decodeObject(of: DateFormatter.self, forKey: KEY)
-  expectEmpty(missing)
+    var wrongType = KU.decodeObject(of: DateFormatter.self, forKey: KEY)
+    expectEmpty(missing)
 
-  KU.finishDecoding()
+    KU.finishDecoding()
+  }
 }
 
-if #available(OSX 10.11, iOS 9.0, *) {
+if #available(OSX 10.12, iOS 10.0, watchOS 3.0, tvOS 10.0, *) {
   FoundationTestSuite.test("NSKeyedUnarchiver/decodeTopLevel*") {
     let obj = NSPredicate(value: true)
     let data = createTestArchive()
 
     // first confirm .decodeObjectWithClasses overlay requires an array of classes
-    var KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+    var KU = NSKeyedUnarchiver(forReadingWith: data)
     var nonTopLevelResult = KU.decodeObject(of: [NSPredicate.self], forKey: KEY)
     expectTrue(nonTopLevelResult != nil)
     KU.finishDecoding()
 
-    KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+    KU = NSKeyedUnarchiver(forReadingWith: data)
     do {
       // decodeObjectForKey(_:) throws
       let decoded1 = try KU.decodeTopLevelObject(forKey: KEY) as? NSPredicate
@@ -309,7 +310,7 @@ if #available(OSX 10.11, iOS 9.0, *) {
       KU.finishDecoding()
 
       // recreate so we can do the rest securely
-      KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+      KU = NSKeyedUnarchiver(forReadingWith: data)
       KU.requiresSecureCoding = true
 
       // decodeObjectOfClass(_:,forKey:) throws
@@ -331,7 +332,7 @@ if #available(OSX 10.11, iOS 9.0, *) {
     }
     KU.finishDecoding()
 
-    KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+    KU = NSKeyedUnarchiver(forReadingWith: data)
     KU.requiresSecureCoding = true
     do {
       // recreate so we avoid caches from above
@@ -342,7 +343,7 @@ if #available(OSX 10.11, iOS 9.0, *) {
       // expected
     }
     KU.finishDecoding()
-    KU = NSKeyedUnarchiver(forReadingWith: data as Data)
+    KU = NSKeyedUnarchiver(forReadingWith: data)
     KU.requiresSecureCoding = true
     do {
       let wrongClasses: [AnyClass] = [DateFormatter.self]
@@ -354,14 +355,24 @@ if #available(OSX 10.11, iOS 9.0, *) {
     }
     KU.finishDecoding()
 
-    // confirm the that class function works
+    // confirm the that class function works (deprecated one)
     do {
-      let decoded = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(data) as? NSPredicate
+      let decoded = try NSKeyedUnarchiver.unarchiveTopLevelObjectWithData(data as NSData) as? NSPredicate
       expectEqual(obj, decoded)
     }
     catch {
       expectUnreachableCatch(error)
     }
+    
+    // confirm the that class function works
+    do {
+        let decoded = try NSKeyedUnarchiver.unarchiveTopLevelObject(with: data) as? NSPredicate
+        expectEqual(obj, decoded)
+    }
+    catch {
+        expectUnreachableCatch(error)
+    }
+
   }
 
   FoundationTestSuite.test("NSKeyedUnarchiver/decodeTopLevelObjectOfClass(_:forKey:)/trap") {

@@ -1412,9 +1412,19 @@ internal func NS_Swift_NSKeyedUnarchiver_unarchiveObjectWithData(
 
 extension NSKeyedUnarchiver {
   @available(OSX 10.11, iOS 9.0, *)
+  @available(*, deprecated, renamed:"unarchiveTopLevelObject(with:)")
   public class func unarchiveTopLevelObjectWithData(_ data: NSData) throws -> AnyObject? {
     var error: NSError?
     let result = NS_Swift_NSKeyedUnarchiver_unarchiveObjectWithData(self, data as AnyObject, &error)
+    try resolveError(error)
+    return result
+  }
+
+  @available(OSX 10.11, iOS 9.0, *)
+  public class func unarchiveTopLevelObject(with data: Data) throws -> AnyObject? {
+    var error: NSError?
+    let nsData = data as NSData
+    let result = NS_Swift_NSKeyedUnarchiver_unarchiveObjectWithData(self, nsData as AnyObject, &error)
     try resolveError(error)
     return result
   }
