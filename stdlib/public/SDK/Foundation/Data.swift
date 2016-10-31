@@ -161,6 +161,7 @@ public final class _DataStorage {
         }
     }
     
+    // Deprecated
     public func enumerateBytes(_ block: (_ buffer: UnsafeBufferPointer<UInt8>, _ byteIndex: Data.Index, _ stop: inout Bool) -> Void) {
         var stop: Bool = false
         switch _backing {
@@ -188,6 +189,39 @@ public final class _DataStorage {
                 var stopv = false
                 let bytePtr = ptr.bindMemory(to: UInt8.self, capacity: range.length)
                 block(UnsafeBufferPointer(start: bytePtr, count: range.length), range.length, &stopv)
+                if stopv {
+                    stop.pointee = true
+                }
+            }
+            break
+        }
+    }
+    
+    public func enumerateBytes(_ block: (_ buffer: UnsafeRawBufferPointer, _ byteIndex: Data.Index, _ stop: inout Bool) -> Void) {
+        var stop: Bool = false
+        switch _backing {
+        case .swift:
+            block(UnsafeRawBufferPointer(start: _bytes, count: _length), 0, &stop)
+            break
+        case .immutable:
+            block(UnsafeRawBufferPointer(start: _bytes, count: _length), 0, &stop)
+            break
+        case .mutable:
+            block(UnsafeRawBufferPointer(start: _bytes, count: _length), 0, &stop)
+            break
+        case .customReference(let d):
+            d.enumerateBytes { (ptr, range, stop) in
+                var stopv = false
+                block(UnsafeRawBufferPointer(start: ptr, count: range.length), range.location, &stopv)
+                if stopv {
+                    stop.pointee = true
+                }
+            }
+            break
+        case .customMutableReference(let d):
+            d.enumerateBytes { (ptr, range, stop) in
+                var stopv = false
+                block(UnsafeRawBufferPointer(start: ptr, count: range.length), range.location, &stopv)
                 if stopv {
                     stop.pointee = true
                 }
@@ -893,6 +927,13 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     
     // MARK: -
     // MARK: Init methods
+
+    /// Initialize a `Data` with copied memory content.
+    ///
+    /// - parameter bytes: A buffer of bytes, which includes a pointer to memory and size. It will be copied.
+    public init(bytes: UnsafeRawBufferPointer) {
+        _backing = _DataStorage(bytes: UnsafeMutableRawPointer(mutating: bytes.baseAddress), length: bytes.count, copy: true, deallocator: nil)
+    }
     
     /// Initialize a `Data` with copied memory content.
     ///
@@ -959,6 +1000,17 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
         _backing = _DataStorage(length: 0)
     }
     
+    /// Initialize a `Data` without copying the bytes.
+    ///
+    /// If the result is mutated and is not a unique reference, then the `Data` will still follow copy-on-write semantics. In this case, the copy will use its own deallocator. Therefore, it is usually best to only use this initializer when you either enforce immutability with `let` or ensure that no other references to the underlying data are formed.
+    /// - parameter bytes: A pointer to the bytes.
+    /// - parameter count: The size of the bytes.
+    /// - parameter deallocator: Specifies the mechanism to free the indicated buffer, or `.none`.
+    /// - precondition: `bytes.baseAddress` must be non-nil.
+    public init(bytesNoCopy bytes: UnsafeMutableRawBufferPointer, deallocator: Deallocator) {
+        let whichDeallocator = deallocator._deallocator
+        _backing = _DataStorage(immutableReference: NSData(bytesNoCopy: bytes.baseAddress!, length: butes.count, deallocator: whichDeallocator))
+    }
     
     /// Initialize a `Data` without copying the bytes.
     ///
@@ -1045,7 +1097,7 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     /// Access the bytes in the data.
     ///
     /// - warning: The byte pointer argument should not be stored and used outside of the lifetime of the call to the closure.
-    @inline(__always)
+    @available(*, deprecated, message: "Use withUnsafeBytes with UnsafeRawBufferPointer instead")
     public func withUnsafeBytes<ResultType, ContentType>(_ body: (UnsafePointer<ContentType>) throws -> ResultType) rethrows -> ResultType {
         let bytes =  _backing.bytes!
         defer { _fixLifetime(self)}
@@ -1053,12 +1105,28 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
         return try body(contentPtr)
     }
     
+    /// Access the bytes in the data as a buffer.
+    ///
+    /// - warning: The pointer argument is only valid inside the scope of the closure. It must not be stored and used outside of the closure.
+    @inline(__always)
+    public func withUnsafeBytes<Result>(_ body: (UnsafeRawBufferPointer) throws -> Result) rethrows -> Result {
+        let bytes = _backing.bytes
+        let numberBytes = self.count
+        defer { _fixLifetime(self) }
+        return try body(UnsafeRawBufferPointer(start: bytes, count: numberBytes))
+    }
+    
+    private mutating func _getUnsafeMutableBytesPointer() -> UnsafeMutableRawPointer {
+        return _applyUnmanagedMutation {
+            return $0.mutableBytes
+        }
+    }
     
     /// Mutate the bytes in the data.
     ///
     /// This function assumes that you are mutating the contents.
     /// - warning: The byte pointer argument should not be stored and used outside of the lifetime of the call to the closure.
-    @inline(__always)
+    @available(*, deprecated, message: "Use withUnsafeMutableRawBufferPointer instead")
     public mutating func withUnsafeMutableBytes<ResultType, ContentType>(_ body: (UnsafeMutablePointer<ContentType>) throws -> ResultType) rethrows -> ResultType {
         if !isKnownUniquelyReferenced(&_backing) {
             _backing = _backing.mutableCopy()
@@ -1069,6 +1137,20 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
         return try body(UnsafeMutablePointer(contentPtr))
     }
     
+    /// Access the bytes in the data as a mutable buffer.
+    ///
+    /// - warning: The pointer argument is only valid inside the scope of the closure. It must not be stored and used outside of the closure.
+    @inline(__always)
+    public mutating func withUnsafeMutableRawBufferPointer<Result>(_ body: (UnsafeMutableRawBufferPointer) throws -> Result) rethrows -> Result {
+        if !isKnownUniquelyReferenced(&_backing) {
+            _backing = _backing.mutableCopy()
+        }
+        let mutableBytes = _backing.mutableBytes
+        let numberBytes = self.count
+        defer { _fixLifetime(self)}
+        return try body(UnsafeMutableRawBufferPointer(start: mutableBytes, count: numberBytes))
+    }
+
     // MARK: -
     // MARK: Copy Bytes
     
@@ -1192,10 +1274,24 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     ///
     /// In some cases, (for example, a `Data` backed by a `dispatch_data_t`, the bytes may be stored discontiguously. In those cases, this function invokes the closure for each contiguous region of bytes.
     /// - parameter block: The closure to invoke for each region of data. You may stop the enumeration by setting the `stop` parameter to `true`.
+    @available(*, deprecated, message: "Use enumerateBytes() with UnsafeRawBufferPointer instead")
     public func enumerateBytes(_ block: (_ buffer: UnsafeBufferPointer<UInt8>, _ byteIndex: Index, _ stop: inout Bool) -> Void) {
         _backing.enumerateBytes(block)
     }
     
+    /// Enumerate the contents of the data.
+    ///
+    /// In some cases, (for example, a `Data` backed by a `DispatchData`, the bytes may be stored discontiguously. In those cases, this function invokes the closure for each contiguous region of bytes.
+    /// - parameter block: The closure to invoke for each region of data. You may stop the enumeration by setting the `stop` parameter to `true`.
+    public func enumerateBytes(_ block: (_ buffer: UnsafeRawBufferPointer, _ byteIndex: Index, _ stop: inout Bool) -> Void) {
+        _backing.enumerateBytes(block)
+    }
+
+    
+    /// Append bytes to the data.
+    ///
+    /// - parameter bytes: A pointer to the bytes to copy in to the data.
+    /// - parameter count: The number of bytes to copy.
     @inline(__always)
     public mutating func append(_ bytes: UnsafePointer<UInt8>, count: Int) {
         if count == 0 { return }
@@ -1205,6 +1301,20 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
         _backing.append(bytes, length: count)
     }
     
+    /// Append a buffer of bytes to the data.
+    ///
+    /// - parameter buffer: The buffer to append to this data.
+    public mutating func append(_ buffer: UnsafeRawBufferPointer) {
+        if count == 0 { return }
+        if !isKnownUniquelyReferenced(&_backing) {
+            _backing = _backing.mutableCopy()
+        }
+        _backing.append(buffer.baseAddress, length: buffer.count)
+    }
+    
+    /// Append Data to the data.
+    ///
+    /// - parameter other: The other data to append.
     @inline(__always)
     public mutating func append(_ other: Data) {
         if !isKnownUniquelyReferenced(&_backing) {
@@ -1576,8 +1686,8 @@ extension Data : CustomStringConvertible, CustomDebugStringConvertible, CustomRe
         var children: [(label: String?, value: Any)] = []
         children.append((label: "count", value: nBytes))
         
-        self.withUnsafeBytes { (bytes : UnsafePointer<UInt8>) in
-            children.append((label: "pointer", value: bytes))
+        self.withUnsafeBytes { (bytes : UnsafeRawBufferPointer) in
+            children.append((label: "pointer", value: bytes.baseAddress))
         }
         
         // Minimal size data is output as an array
