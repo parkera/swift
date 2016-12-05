@@ -617,6 +617,9 @@ public final class _DataStorage {
         _needToZero = true
     }
     
+    convenience public init(bytes: UnsafeMutableRawPointerBuffer, copy: Bool, deallocator: ((UnsafeMutableRawPointer, Int) -> Void)?) {
+        self.init(bytes: bytes.baseAddress, length: bytes.count, copy: copy, deallocator: deallocator)
+    }
     
     public init(bytes: UnsafeMutableRawPointer?, length: Int, copy: Bool, deallocator: ((UnsafeMutableRawPointer, Int) -> Void)?) {
         precondition(length < _DataStorage.maxSize)
@@ -1006,10 +1009,9 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     /// - parameter bytes: A pointer to the bytes.
     /// - parameter count: The size of the bytes.
     /// - parameter deallocator: Specifies the mechanism to free the indicated buffer, or `.none`.
-    /// - precondition: `bytes.baseAddress` must be non-nil.
     public init(bytesNoCopy bytes: UnsafeMutableRawBufferPointer, deallocator: Deallocator) {
         let whichDeallocator = deallocator._deallocator
-        _backing = _DataStorage(immutableReference: NSData(bytesNoCopy: bytes.baseAddress!, length: butes.count, deallocator: whichDeallocator))
+        _backing = _DataStorage(bytes: bytes, copy: false, deallocator: whichDeallocator)
     }
     
     /// Initialize a `Data` without copying the bytes.
@@ -1097,7 +1099,7 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     /// Access the bytes in the data.
     ///
     /// - warning: The byte pointer argument should not be stored and used outside of the lifetime of the call to the closure.
-    @available(*, deprecated, message: "Use withUnsafeBytes with UnsafeRawBufferPointer instead")
+    @available(*, deprecated, message: "Use withUnsafeRawBufferPointer instead")
     public func withUnsafeBytes<ResultType, ContentType>(_ body: (UnsafePointer<ContentType>) throws -> ResultType) rethrows -> ResultType {
         let bytes =  _backing.bytes!
         defer { _fixLifetime(self)}
@@ -1109,17 +1111,10 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     ///
     /// - warning: The pointer argument is only valid inside the scope of the closure. It must not be stored and used outside of the closure.
     @inline(__always)
-    public func withUnsafeBytes<Result>(_ body: (UnsafeRawBufferPointer) throws -> Result) rethrows -> Result {
+    public func withUnsafeRawBufferPointer<Result>(_ body: (UnsafeRawBufferPointer) throws -> Result) rethrows -> Result {
         let bytes = _backing.bytes
         let numberBytes = self.count
-        defer { _fixLifetime(self) }
         return try body(UnsafeRawBufferPointer(start: bytes, count: numberBytes))
-    }
-    
-    private mutating func _getUnsafeMutableBytesPointer() -> UnsafeMutableRawPointer {
-        return _applyUnmanagedMutation {
-            return $0.mutableBytes
-        }
     }
     
     /// Mutate the bytes in the data.
@@ -1147,7 +1142,6 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
         }
         let mutableBytes = _backing.mutableBytes
         let numberBytes = self.count
-        defer { _fixLifetime(self)}
         return try body(UnsafeMutableRawBufferPointer(start: mutableBytes, count: numberBytes))
     }
 
@@ -1305,11 +1299,13 @@ public struct Data : ReferenceConvertible, Equatable, Hashable, RandomAccessColl
     ///
     /// - parameter buffer: The buffer to append to this data.
     public mutating func append(_ buffer: UnsafeRawBufferPointer) {
-        if count == 0 { return }
+        guard buffer.count > 0 else { return }
+        guard let baseAddress = buffer.baseAddress else { return }
+
         if !isKnownUniquelyReferenced(&_backing) {
             _backing = _backing.mutableCopy()
         }
-        _backing.append(buffer.baseAddress, length: buffer.count)
+        _backing.append(baseAddress, length: buffer.count)
     }
     
     /// Append Data to the data.
@@ -1686,7 +1682,7 @@ extension Data : CustomStringConvertible, CustomDebugStringConvertible, CustomRe
         var children: [(label: String?, value: Any)] = []
         children.append((label: "count", value: nBytes))
         
-        self.withUnsafeBytes { (bytes : UnsafeRawBufferPointer) in
+        self.withUnsafeRawBufferPointer { (bytes : UnsafeRawBufferPointer) in
             children.append((label: "pointer", value: bytes.baseAddress))
         }
         
