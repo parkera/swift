@@ -161,8 +161,8 @@ class TestCharacterSet : TestCharacterSetSuper {
         // confirm internal bridged impl types are not exposed to archival machinery
         let cs = CharacterSet() as NSCharacterSet
         let expected: AnyClass = NSCharacterSet.self as AnyClass
-        expectTrue(cs.classForCoder == expected)
-        expectTrue(cs.classForKeyedArchiver == expected)
+        expectEqual(expected, cs.classForCoder)
+        expectEqual(expected, cs.classForKeyedArchiver!)
     }
 
     func test_AnyHashableContainingCharacterSet() {
@@ -241,6 +241,57 @@ class TestCharacterSet : TestCharacterSetSuper {
         expectEqual(0x6, bitmap[12])
         expectEqual(8192, bitmap.count)
     }
+    
+    func test_setOperationsOfEmptySet() {
+        let emptySet = CharacterSet()
+        let abcSet = CharacterSet(charactersIn: "abc")
+        
+        expectTrue(abcSet.isSuperset(of: emptySet))
+        expectTrue(emptySet.isSuperset(of: emptySet))
+        expectFalse(emptySet.isSuperset(of: abcSet))
+        
+        expectTrue(abcSet.isStrictSuperset(of: emptySet))
+        expectFalse(emptySet.isStrictSuperset(of: emptySet))
+        expectFalse(emptySet.isStrictSuperset(of: abcSet))
+        
+        expectTrue(emptySet.isSubset(of: abcSet))
+        expectTrue(emptySet.isSubset(of: emptySet))
+        expectFalse(abcSet.isSubset(of: emptySet))
+        
+        expectTrue(emptySet.isStrictSubset(of: abcSet))
+        expectFalse(emptySet.isStrictSubset(of: emptySet))
+        expectFalse(abcSet.isStrictSubset(of: emptySet))
+        expectFalse(abcSet.isStrictSubset(of: abcSet))
+        
+        expectEqual(emptySet, emptySet)
+        expectNotEqual(abcSet, emptySet)
+    }
+    
+    func test_moreSetOperations() {
+        let abcSet = CharacterSet(charactersIn: "abc")
+        let abcdSet = CharacterSet(charactersIn: "abcd")
+        
+        expectEqual(abcSet, abcSet)
+        expectNotEqual(abcSet, abcdSet)
+        
+        expectTrue(abcSet.isStrictSubset(of:abcdSet))
+        expectFalse(abcdSet.isStrictSubset(of:abcSet))
+        
+        expectTrue(abcdSet.isStrictSuperset(of:abcSet))
+        expectFalse(abcSet.isStrictSuperset(of:abcdSet))
+    }
+    
+    func test_resilienceBug() {
+        /*
+        // test if a fix or a workaround for rdar://29474937  is applied
+        for i in 1...100{
+            test_superSet()
+            test_setOperationsOfEmptySet()
+            test_moreSetOperations()
+        }
+ */
+    }
+    
 }
 
 
@@ -264,6 +315,9 @@ CharacterSetTests.test("test_subtractNonEmptySet") { TestCharacterSet().test_sub
 CharacterSetTests.test("test_symmetricDifference") { TestCharacterSet().test_symmetricDifference() }
 CharacterSetTests.test("test_hasMember") { TestCharacterSet().test_hasMember() }
 CharacterSetTests.test("test_bitmap") { TestCharacterSet().test_bitmap() }
+CharacterSetTests.test("test_setOperationsOfEmptySet") { TestCharacterSet().test_setOperationsOfEmptySet() }
+CharacterSetTests.test("test_moreSetOperations") { TestCharacterSet().test_moreSetOperations() }
+CharacterSetTests.test("test_resilienceBug") { TestCharacterSet().test_resilienceBug() }
 runAllTests()
 #endif
 
